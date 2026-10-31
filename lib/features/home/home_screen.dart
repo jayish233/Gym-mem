@@ -27,7 +27,7 @@ class HomeScreen extends StatelessWidget {
             ? 'afternoon'
             : 'evening';
         final workout = store.plan[store.todayIndex];
-        final summary = store.monthSummary(now.year, now.month);
+        final summary = store.monthSummary(store.today.year, store.today.month);
         return MemberColumn(
           children: [
             Row(
@@ -45,7 +45,7 @@ class HomeScreen extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        store.gym.name,
+                        store.gymName,
                         style: PresenceType.sans(
                           14,
                           color: PresenceColors.muted,

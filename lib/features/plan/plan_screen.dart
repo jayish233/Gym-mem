@@ -202,6 +202,7 @@ class _DayEditorState extends State<_DayEditor> {
               'This is for your own tracking. It does not check you in at the gym.',
               style: PresenceType.caption,
             ),
+            if (store.planError != null) FieldError(store.planError!),
           ],
         ),
       ],

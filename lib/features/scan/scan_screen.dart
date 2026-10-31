@@ -6,13 +6,23 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../data/api_client.dart';
 import '../../data/member_store.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/presence_button.dart';
 import 'widgets/result_view.dart';
 import 'widgets/viewfinder.dart';
 
-enum _View { permission, denied, scanning, expired, duplicate, success }
+enum _View {
+  permission,
+  denied,
+  scanning,
+  expired,
+  invalid,
+  failed,
+  duplicate,
+  success,
+}
 
 /// Native hook that opens this app's page in the OS Settings.
 const _settings = MethodChannel('presence/settings');
@@ -32,6 +42,11 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   late _View _view = _granted ? _View.scanning : _View.permission;
   bool _handled = false;
+
+  /// A code was read and the server has not answered yet.
+  bool _checking = false;
+  CheckInResult? _result;
+  String _failure = '';
 
   @override
   void initState() {
@@ -55,6 +70,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
   void _scan() => setState(() {
     _handled = false;
+    _checking = false;
     _view = _View.scanning;
   });
 
@@ -68,22 +84,42 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
     _resolve(raw);
   }
 
-  /// Mock validation. Leaving the scanning view unmounts and stops the camera.
-  void _resolve(String payload) {
+  /// The server decides. Success shows only after it recorded the visit.
+  /// Leaving the scanning view unmounts and stops the camera.
+  Future<void> _resolve(String payload) async {
     _handled = true;
-    final store = widget.store;
-    setState(() {
-      if (store.checkedInToday) {
-        _view = _View.duplicate;
-      } else if (payload.toLowerCase().contains('expired')) {
-        _view = _View.expired;
-      } else {
-        _view = store.checkIn(store.clock.now)
-            ? _View.success
-            : _View.duplicate;
-      }
-    });
+    setState(() => _checking = true);
+    try {
+      final r = await widget.store.checkIn(payload);
+      if (!mounted) return;
+      setState(() {
+        _result = r;
+        _view = switch (r.result) {
+          CheckIn.checkedIn => _View.success,
+          CheckIn.duplicate => _View.duplicate,
+          CheckIn.expired => _View.expired,
+          CheckIn.invalid => _View.invalid,
+        };
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _failure = e.message;
+        _view = _View.failed;
+      });
+    }
   }
+
+  /// Debug only: shows a result screen without the camera or the server.
+  void _preview(_View view) => setState(() {
+    _handled = true;
+    _result = CheckInResult(
+      CheckIn.checkedIn,
+      DateTime.now(),
+      widget.store.currentStreak,
+    );
+    _view = view;
+  });
 
   Widget _cameraError(BuildContext context, MobileScannerException error) {
     if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
@@ -140,8 +176,9 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
   }
 
   Widget _body(BuildContext context) {
-    final store = widget.store;
-    final today = DateFormat('EEEE d MMMM').format(store.clock.now);
+    final day = DateFormat('EEEE d MMMM');
+    final today = day.format(widget.store.today);
+    final at = _result?.checkedInAt ?? DateTime.now();
     return switch (_view) {
       _View.permission => _Prompt(
         title: 'Allow camera access',
@@ -180,7 +217,9 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
           Column(
             children: [
               Text(
-                'Point at the code on the gym screen.',
+                _checking
+                    ? 'Checking the code…'
+                    : 'Point at the code on the gym screen.',
                 textAlign: TextAlign.center,
                 style: PresenceType.bodyMuted,
               ),
@@ -196,7 +235,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                         13,
                         color: PresenceColors.muted,
                       ),
-                      onPressed: () => _resolve('debug-preview'),
+                      onPressed: () => _preview(_View.success),
                     ),
                     PresenceButton(
                       label: 'Preview: expired code',
@@ -205,10 +244,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                         13,
                         color: PresenceColors.muted,
                       ),
-                      onPressed: () => setState(() {
-                        _handled = true;
-                        _view = _View.expired;
-                      }),
+                      onPressed: () => _preview(_View.expired),
                     ),
                   ],
                 ),
@@ -223,6 +259,20 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
         action: 'Scan again',
         onAction: _scan,
       ),
+      _View.invalid => ResultView(
+        icon: LucideIcons.circleAlert,
+        title: 'That code is not for your gym',
+        body: 'Scan the code that is on the gym screen right now.',
+        action: 'Scan again',
+        onAction: _scan,
+      ),
+      _View.failed => ResultView(
+        icon: LucideIcons.wifiOff,
+        title: 'You are not checked in',
+        body: _failure,
+        action: 'Scan again',
+        onAction: _scan,
+      ),
       _View.duplicate => ResultView(
         icon: LucideIcons.check,
         title: 'Already checked in',
@@ -234,7 +284,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
         icon: LucideIcons.check,
         positive: true,
         title: 'You are checked in',
-        body: '$today · ${DateFormat('h:mm a').format(store.clock.now)}',
+        body: '${day.format(at)} · ${DateFormat('h:mm a').format(at)}',
         action: 'Done',
         onAction: () => context.go('/home'),
         extra: Padding(
@@ -249,7 +299,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
                 color: PresenceColors.ink,
               ),
               Text(
-                '${store.currentStreak}-day streak',
+                '${_result?.currentStreak ?? 0}-day streak',
                 style: PresenceType.sans(15, weight: FontWeight.w500),
               ),
             ],

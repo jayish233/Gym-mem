@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../data/api_client.dart';
 import '../../data/member_store.dart';
 import '../../data/session_controller.dart';
 import '../../theme/tokens.dart';
@@ -29,7 +30,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late final _phone = TextEditingController(text: widget.store.member.phone);
   late final _email = TextEditingController(text: widget.store.member.email);
   bool _saved = false;
+  bool _saving = false;
   String? _nameError;
+  String? _saveError;
 
   @override
   void dispose() {
@@ -43,22 +46,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (_saved) setState(() => _saved = false);
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (_name.text.trim().isEmpty) {
       setState(() => _nameError = 'Enter your name.');
       return;
     }
-    widget.store.saveProfile(name: _name.text, phone: _phone.text);
     setState(() {
       _nameError = null;
-      _saved = true;
+      _saveError = null;
+      _saving = true;
     });
+    try {
+      await widget.store.saveProfile(name: _name.text, phone: _phone.text);
+      if (mounted) setState(() => _saved = true);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _saveError = e.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
-  void _signOut() {
-    widget.store.reset();
-    widget.session.signOut(); // router redirect takes us to /signin
-  }
+  // The router redirect takes us to /signin. Attendance and the plan stay
+  // on the server.
+  void _signOut() => widget.session.signOut();
 
   @override
   Widget build(BuildContext context) {
@@ -86,7 +96,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     Text(
-                      store.gym.name,
+                      store.gymName,
                       style: PresenceType.sans(14, color: PresenceColors.muted),
                     ),
                   ],
@@ -154,9 +164,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 readOnly: true,
                 helper: 'Email is set by your gym. Ask them to change it.',
               ),
+              if (_saveError != null) FieldError(_saveError!),
               PresenceButton(
                 label: _saved ? 'Saved' : 'Save changes',
                 height: 56,
+                loading: _saving,
                 onPressed: _save,
               ),
             ],

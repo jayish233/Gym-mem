@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/api_client.dart';
 import '../../data/session_controller.dart';
 import '../../theme/tokens.dart';
 import '../../widgets/presence_button.dart';
@@ -18,55 +19,82 @@ class SigninScreen extends StatefulWidget {
 
 class _SigninScreenState extends State<SigninScreen> {
   final _email = TextEditingController();
+  final _password = TextEditingController();
+  String? _emailError;
+  String? _passwordError;
+
+  /// From the server, e.g. "Email or password is incorrect." Not tied to
+  /// either field so it never says which one failed.
   String? _error;
   bool _sending = false;
 
   @override
   void dispose() {
     _email.dispose();
+    _password.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    if (!SessionController.isValidEmail(_email.text)) {
-      setState(() => _error = 'Enter the email your gym has on file.');
-      return;
-    }
     setState(() {
+      _emailError = SessionController.isValidEmail(_email.text)
+          ? null
+          : 'Enter the email your gym has on file.';
+      _passwordError = _password.text.length >= 8
+          ? null
+          : 'Enter your password. It has at least 8 characters.';
       _error = null;
-      _sending = true;
     });
-    await widget.session.sendCode(_email.text);
-    if (!mounted) return;
-    setState(() => _sending = false);
-    context.go('/signin/code');
+    if (_emailError != null || _passwordError != null) return;
+    setState(() => _sending = true);
+    try {
+      await widget.session.login(_email.text, _password.text);
+      // Terms accepted: the router redirect has already moved us to /home.
+      if (mounted && widget.session.needsTerms) context.go('/signin/terms');
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return SigninLayout(
-      form: SigninForm(
-        title: 'Sign in',
-        sub: 'Check in and keep your streak.',
-        children: [
-          PresenceTextField(
-            key: const ValueKey('email'),
-            label: 'Email',
-            controller: _email,
-            hint: 'you@example.com',
-            keyboardType: TextInputType.emailAddress,
-            autofillHints: const [AutofillHints.email],
-            textInputAction: TextInputAction.go,
-            onSubmitted: (_) => _submit(),
-            error: _error,
-          ),
-          PresenceButton(
-            label: 'Send code',
-            loading: _sending,
-            onPressed: _submit,
-          ),
-          const _LegalFooter(),
-        ],
+      form: AutofillGroup(
+        child: SigninForm(
+          title: 'Sign in',
+          sub: 'Check in and keep your streak.',
+          children: [
+            PresenceTextField(
+              key: const ValueKey('email'),
+              label: 'Email',
+              controller: _email,
+              hint: 'you@example.com',
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              textInputAction: TextInputAction.next,
+              error: _emailError,
+            ),
+            PresenceTextField(
+              key: const ValueKey('password'),
+              label: 'Password',
+              controller: _password,
+              obscureText: true,
+              autofillHints: const [AutofillHints.password],
+              textInputAction: TextInputAction.go,
+              onSubmitted: (_) => _submit(),
+              error: _passwordError,
+            ),
+            if (_error != null) FieldError(_error!),
+            PresenceButton(
+              label: 'Sign in',
+              loading: _sending,
+              onPressed: _submit,
+            ),
+            const _LegalFooter(),
+          ],
+        ),
       ),
     );
   }

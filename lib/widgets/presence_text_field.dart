@@ -20,6 +20,7 @@ class PresenceTextField extends StatelessWidget {
     this.onChanged,
     this.mono = false,
     this.semanticLabel,
+    this.obscureText = false,
   });
 
   final String? label;
@@ -35,6 +36,7 @@ class PresenceTextField extends StatelessWidget {
   final ValueChanged<String>? onChanged;
   final bool mono;
   final String? semanticLabel;
+  final bool obscureText;
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +53,7 @@ class PresenceTextField extends StatelessWidget {
       child: TextField(
         controller: controller,
         readOnly: readOnly,
+        obscureText: obscureText,
         keyboardType: keyboardType,
         autofillHints: autofillHints,
         textInputAction: textInputAction,

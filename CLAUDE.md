@@ -5,9 +5,8 @@ and visual rules are in sections 4 and 5. The backend is in section 8 and
 matches `PRD.md`. If this file and `PRD.md` disagree on the API, data model, or
 auth, `PRD.md` wins. The HTML prototype is reference only.
 
-The Flutter screens already run on an in-memory store. Do not rebuild them.
-The next build is the Node.js API. Do not wire `lib/` to the network until a
-later task says so.
+The Flutter screens and the Node.js API in `server/` are both built, and the
+app talks to the API. Do not rebuild either; extend them.
 
 ---
 
@@ -18,9 +17,8 @@ Node.js and TypeScript API with PostgreSQL. A member signs in with email and
 password, accepts the Terms and Privacy Policy, checks in by scanning a gym
 code, and reviews attendance, streaks, a weekly workout plan, and profile.
 
-There is no OTP, no emailed code, and no `/signin/code` step in the target
-flow. The code screen still in the Flutter tree is the old mock and must not
-be copied into the server.
+There is no OTP, no emailed code, and no `/signin/code` step. First sign-in
+goes email + password → `/signin/terms` (accept once) → `/home`.
 
 ### In scope
 
@@ -43,7 +41,8 @@ be copied into the server.
 - PWA "Add to home screen" banner.
 - Flutter persistence (`shared_preferences`, `hive`, `sqflite`, `isar`, files).
 - Platform targets other than Android and iOS. Leave `linux/` alone.
-- Connecting the Flutter client to this API until that task is asked for.
+- Keeping the session across app restarts (that needs device storage, which
+  rule 1 forbids). A restart signs the member out.
 
 ---
 
@@ -53,8 +52,9 @@ These are non-negotiable. Check them before every commit.
 
 1. **The database lives in `server/`, not in Flutter.** Do not add
    `shared_preferences`, `hive`, `sqflite`, `isar`, `drift`, `firebase_*`, or
-   `supabase_*` to `pubspec.yaml`. Do not add `http` until the client-connection
-   task. Postgres access stays in the Node server.
+   `supabase_*` to `pubspec.yaml`. The app calls the API through
+   `lib/data/api_client.dart` (`dart:io` `HttpClient`), so no `http` or `dio`
+   package. Postgres access stays in the Node server.
 2. **No owner code paths.** No `role` enum, no `isOwner`, no owner routes, no
    registration endpoint.
 3. **Design system only.** Use only the colours, type sizes, spacing, radii and
@@ -103,15 +103,24 @@ Remove `cupertino_icons` only if it ends up unused.
 - **State:** plain `ChangeNotifier` classes exposed with
   `ListenableBuilder` / `AnimatedBuilder` or passed down the tree. No `provider`,
   `riverpod`, `bloc`, code generation or `build_runner`.
-- **Three notifiers, created once in `main()` and passed into the router:**
-  - `SessionController` — today this is the in-memory stand-in. The target
-    methods are `login(email, password)`, `acceptTerms()`, and `signOut()`
-    with a bearer token. Do not keep `sendCode` / `verify` once the client
-    calls the API. Do not add those OTP methods to the server.
-  - `MemberStore` — the member, gym, membership, attendance set, workout plan,
-    profile edits, `checkIn(DateTime at)`, streak and summary getters.
-  - `MockClock` — `DateTime get now`; defaults to `DateTime.now()` but is
-    injectable so tests and screenshots can freeze time.
+- **Created once in `main()` and passed into the router:**
+  - `ApiClient` — base URL from `--dart-define=API_URL`, bearer token in
+    memory only, throws `ApiException` whose `message` the UI shows as is.
+    A 401 on a held token signs the member out.
+  - `SessionController` — `login(email, password)`, `acceptTerms()`,
+    `signOut()` (revokes on the server without waiting), `isSignedIn`,
+    `needsTerms`. No OTP methods anywhere.
+  - `MemberStore` — loads `/me`, `/attendance/summary`, `/workouts` after
+    sign-in; `loadMonth` for History; `checkIn(code)`; `saveProfile`. Plan
+    edits update the UI at once and save in the background, one request at a
+    time; failures set `planError`. Figures come from the server; the store
+    never computes streaks itself. `today` is the gym-local date from the
+    summary.
+  - `MockClock` — device time, used only for the greeting; injectable for
+    tests.
+- **Tests** use `test/fake_api.dart`, an in-memory `ApiClient` with the
+  server's JSON contract, built from `lib/data/mock/seed.dart` and
+  `attendance_math.dart`.
 - **Widgets:** `StatelessWidget` by default. `StatefulWidget` only for local UI
   state (text controllers, scan view state, selected day).
 - **Routing:** `go_router` with a `ShellRoute` that wraps `/home`, `/history`,
@@ -155,14 +164,15 @@ lib/
 │   ├── mock/
 │   │   ├── mock_clock.dart
 │   │   └── seed.dart             # buildSeedMember(), buildSeedAttendance(clock), buildSeedPlan()
-│   ├── member_store.dart         # ChangeNotifier
-│   ├── session_controller.dart   # ChangeNotifier
-│   └── attendance_math.dart      # pure functions: openDays, currentStreak, longestStreak, monthSummary
+│   ├── api_client.dart           # HTTP + bearer token, ApiException
+│   ├── member_store.dart         # ChangeNotifier over the API
+│   ├── session_controller.dart   # ChangeNotifier: login, terms, sign out
+│   └── attendance_math.dart      # reference rules (the server ports them; tests use them)
 ├── features/
 │   ├── signin/
-│   │   ├── signin_screen.dart
-│   │   ├── code_screen.dart
-│   │   └── widgets/ (brand_pane.dart, code_boxes.dart)
+│   │   ├── signin_screen.dart    # email + password
+│   │   ├── terms_screen.dart     # accept once
+│   │   └── widgets/brand_pane.dart
 │   ├── home/home_screen.dart (+ widgets/streak_panel.dart, week_row.dart)
 │   ├── history/history_screen.dart (+ widgets/month_grid.dart, figure_grid.dart)
 │   ├── scan/scan_screen.dart (+ widgets/viewfinder.dart, result_view.dart)
@@ -283,9 +293,6 @@ Label above the field (13 / 500), 8 px gap. Input 52 high, padding 0 16, radius
 muted text, helper caption below. Error: 2 px ink border, an icon and one
 sentence that says how to fix it. No red.
 
-Code boxes: 6 cells, 56 high, radius 12, hairline border, Geist Mono 22 centred,
-`inputmode numeric`, auto-advance, backspace moves back, paste fills all six.
-
 Chips (day selector): min height 64, radius 14, selected ink fill mist text,
 unselected transparent with ink 20 % border.
 
@@ -374,26 +381,34 @@ form centred, `max-width 380`.
 
 **Form (email and password)**
 
-The shipped app still shows "Send code" and `/signin/code`. That is the old
-mock. The target screen, used when the client calls the API, is:
-
 - Title "Sign in" (32 / 600 on wide, Page title 24 on phones).
 - Sub "Check in and keep your streak." Body 15 muted.
 - Field "Email", `type email`, `autocomplete email`, placeholder
   `you@example.com`.
 - Field "Password", `type password`, `autocomplete current-password`.
 - Primary button 52 "Sign in".
-- Validation: trim email; require `@` and a `.` after it. Password at least 8
-  characters. Error state per 4.6. Wrong credentials use the server message
-  "Email or password is incorrect." Do not say which field failed.
-- On submit: `POST /auth/login`. If `termsAccepted` is false, show the Terms
-  and Privacy Policy and require acceptance (`POST /auth/accept-terms`) before
-  Home. If true, go to `/home`.
+- Validation: trim email; require `@` and a `.` after it ("Enter the email
+  your gym has on file."). Password at least 8 characters ("Enter your
+  password. It has at least 8 characters."). Error state per 4.6. Server
+  errors ("Email or password is incorrect.", rate limit, offline) show as one
+  `FieldError` above the button, not on a field, so it never says which
+  field failed.
+- On submit: `POST /auth/login`. If `termsAccepted` is false, go to
+  `/signin/terms`. If true, load the member and go to `/home`.
 - Footer caption centred: "By continuing you agree to the Terms and Privacy
   Policy." with "Terms" → `/terms` and "Privacy Policy" → `/privacy` as
   underlined ink links.
-- Do not build a 6-digit code step. Remove `/signin/code` when the client is
-  connected. No email is sent.
+- No 6-digit code step. No email is sent.
+
+**Terms step — `/signin/terms`** (first sign-in only; redirects to `/signin`
+without a pending token)
+
+- Same chrome. Title "Before you start". Sub "Read and accept the Terms of
+  Service and Privacy Policy."
+- Text links "Terms of Service" → `/terms`, "Privacy Policy" → `/privacy`.
+- Key action 52 "Accept and continue" → `POST /auth/accept-terms`, load,
+  `/home`. Server errors as a `FieldError` above it.
+- Muted text link "Use a different account" → sign out, `/signin`.
 
 ### 5.2 Home — `/home`
 
@@ -471,15 +486,16 @@ vertically, gap 28. Four exclusive states:
 - Square viewfinder, radius 24, ink background, `MobileScanner` preview inside,
   four corner brackets (teal, 2 px) inset 14 %, and a 2 px teal scan line at
   90 % opacity sweeping top-to-bottom per 4.9.
-- Body 15 muted centred: "Point at the code on the gym screen."
-- Mock validation on first decoded value, then stop the camera:
-  - already checked in today → state D (duplicate);
-  - payload contains `expired` (case-insensitive) → state C (expired) — this is
-    the test hook;
-  - any other non-empty payload → `store.checkIn(clock.now)` → state E.
+- Body 15 muted centred: "Point at the code on the gym screen." While the
+  server answers: "Checking the code…".
+- On the first decoded value, `store.checkIn(payload)` →
+  `POST /attendance/check-in`; the server decides: `checked_in` → E,
+  `duplicate` → D, `expired` → C, `invalid` → F. No answer (offline, timeout)
+  → G. The `expired` test hook lives on the server.
 - In debug builds only (`kDebugMode`), show two small text links under the
   caption: "Preview: success" and "Preview: expired code" that jump to the
-  result states without the camera.
+  result states without the camera. They never call the API and never record
+  a visit.
 
 **C. Expired**
 
@@ -498,9 +514,25 @@ vertically, gap 28. Four exclusive states:
 **E. Success** (`role=status`)
 
 - 104 px teal circle, ink check icon 48.
-- Result title "You are checked in". Body 15 muted "{EEEE d MMMM} · {h:mm a}".
-- Row: flame icon 20 + "{currentStreak}-day streak" (15 / 500).
+- Result title "You are checked in". Body 15 muted "{EEEE d MMMM} · {h:mm a}"
+  from the server's `checkedInAt`.
+- Row: flame icon 20 + "{currentStreak}-day streak" (15 / 500) from the
+  response.
 - Primary 56 "Done" → `/home`.
+
+**F. Invalid**
+
+- Same circle as C with the alert icon.
+- Result title "That code is not for your gym". Body "Scan the code that is on
+  the gym screen right now."
+- Primary 56 "Scan again" → state B.
+
+**G. Not reached**
+
+- Same circle as C with a wifi-off icon.
+- Result title "You are not checked in". Body: the `ApiException` message
+  ("Could not reach Presence. Check your connection and try again.").
+- Primary 56 "Scan again" → state B.
 
 Camera lifecycle: start on entering B, stop on result, dispose on leaving the
 route. Handle `AppLifecycleState` pause/resume.
@@ -551,15 +583,14 @@ Tab bar: Profile active.
 3. **Form**, gap 18: Name (text), Phone (`tel`), Email (read-only per 4.6 with
    helper "Email is set by your gym. Ask them to change it."). Primary 56 "Save
    changes"; after a successful save the label reads "Saved" until a field
-   changes again. Saving writes to `MemberStore` (memory only). Name may not be
-   blank; phone is free text.
+   changes again. Saving calls `PATCH /me`; failures show as a `FieldError`
+   above the button. Name may not be blank; phone is free text.
 4. **Legal rows**: "Privacy Policy" → `/privacy`, "Terms of Service" → `/terms`.
    Rows min 56, hairline top (and bottom on the last), 15 text, chevron-right
    icon 20 muted at the right.
 5. **Sign out**: Secondary 52, 1 px ink outline, "Sign out" →
    `POST /auth/logout`, drop the bearer token, then `/signin`. Logout does not
-   delete attendance or the workout plan. The in-memory `MemberStore.reset()`
-   on sign out applies only while the app is still on mock data.
+   delete attendance or the workout plan.
 
 ### 5.7 Legal — `/privacy`, `/terms`
 
@@ -574,9 +605,10 @@ attendance dates]"). Do not write legal prose.
 
 ## 6. Mock data contract
 
-All seed data lives in `lib/data/mock/seed.dart` and is built from `MockClock`
-so the app looks right on **any** date. Never hardcode a calendar date in a
-widget.
+The app reads live data from the API. This seed exists twice: in
+`server/seed.ts` (the real database) and in `lib/data/mock/seed.dart`, which
+the test `FakeApi` uses. Both are built from the current date so the app
+looks right on **any** day. Never hardcode a calendar date in a widget.
 
 ### Member, gym, membership
 
@@ -802,7 +834,14 @@ flutter analyze          # must be clean
 dart format .            # run before finishing
 flutter test             # existing widget and math tests must keep passing
 cd server && npm test    # API tests for the backend
+
+# Run against the API on your Mac (phone and Mac on the same Wi-Fi):
+cd server && npm start
+flutter run --dart-define=API_URL=http://<mac-lan-ip>:3000
 ```
+
+Without `API_URL` the app uses `http://10.0.2.2:3000`, which is the host Mac as
+seen from the Android emulator.
 
 Platform setup the camera needs (do this when adding `mobile_scanner`):
 
@@ -813,8 +852,8 @@ Platform setup the camera needs (do this when adding `mobile_scanner`):
 
 ### Build order
 
-The Flutter app through the legal pages is already built. Do not redo it.
-Build the server in this order:
+The Flutter app, the server, and the connection between them are built. The
+server was built in this order:
 
 1. `server/` project, migrations for the tables in section 8.2.
 2. Password hashing, sessions, login, logout, accept-terms, and the terms gate.
@@ -824,7 +863,9 @@ Build the server in this order:
 6. `npm run seed` from section 8.4.
 7. API tests listed below.
 
-Leave `lib/` on the in-memory store until a later task connects it.
+Then the client: `ApiClient`, `SessionController` and `MemberStore` over the
+API, the password sign-in and terms step, and Scan, History, Plan and Profile
+calling the API.
 
 ### Tests to write (minimum)
 
@@ -841,9 +882,11 @@ Backend:
 - Marking a workout day completed does not change attendance.
 - `PATCH /me` cannot change email. A member cannot read another member's rows.
 
-Existing Flutter tests stay: `attendance_math_test.dart`,
-`member_store_test.dart`, `signin_flow_test.dart`, `tab_bar_test.dart`.
-Update `signin_flow_test.dart` only when the client drops the OTP screen.
+Flutter (against `test/fake_api.dart`): `attendance_math_test.dart`,
+`member_store_test.dart` (load, check-in outcomes, offline is never a
+check-in, plan saves and errors, sign-out, rejected token),
+`signin_flow_test.dart` (field errors, wrong password, terms step, offline,
+sign out), `tab_bar_test.dart`, `routes_render_test.dart`.
 
 ### When to stop and ask
 
@@ -854,7 +897,7 @@ Stop and ask the user instead of guessing when:
 - Camera scanning cannot be exercised in the available environment (say so; do
   not fake a success path outside the debug preview links).
 - The task would add an owner, staff, registration, or OTP flow.
-- The task would point Flutter at the API. That connection is a separate ask.
+- The task would keep data on the device (rule 1).
 
 Everything else (exact pixel tweaks, icon choice within Lucide, copy
 punctuation) is your call; follow section 4.

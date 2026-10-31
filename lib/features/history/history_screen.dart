@@ -8,6 +8,7 @@ import '../../widgets/day_cell.dart';
 import '../../widgets/figure.dart';
 import '../../widgets/member_scaffold.dart';
 import '../../widgets/presence_button.dart';
+import '../../widgets/presence_text_field.dart';
 import 'widgets/month_grid.dart';
 
 class HistoryScreen extends StatefulWidget {
@@ -25,8 +26,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
     widget.store.today.month,
   );
 
-  void _shift(int by) =>
-      setState(() => _month = DateTime(_month.year, _month.month + by));
+  @override
+  void initState() {
+    super.initState();
+    widget.store.loadMonth(_month);
+  }
+
+  void _shift(int by) {
+    setState(() => _month = DateTime(_month.year, _month.month + by));
+    widget.store.loadMonth(_month);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +48,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
         final canPrev = _month.isAfter(DateTime(start.year, start.month));
         final isCurrent = _month == DateTime(today.year, today.month);
         final summary = store.monthSummary(_month.year, _month.month);
+        // After a check-in the cache is cleared; fetch the month again.
+        if (!store.hasCalendar(_month) && !store.calendarFailed(_month)) {
+          store.loadMonth(_month);
+        }
         return MemberColumn(
           children: [
             Row(
@@ -71,63 +84,104 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
               ],
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: PresenceSpace.s16,
-              children: [
-                MonthGrid(store: store, month: _month),
-                const _Legend(),
-              ],
-            ),
-            Column(
-              spacing: PresenceSpace.s20,
-              children: [
-                Row(
-                  spacing: PresenceSpace.s24,
-                  children: [
-                    Expanded(
-                      child: Figure(
-                        label: 'Visits',
-                        value: '${summary.visits}',
+            if (!store.hasCalendar(_month))
+              _MonthStatus(
+                failed: store.calendarFailed(_month),
+                onRetry: () => store.loadMonth(_month),
+              )
+            else ...[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: PresenceSpace.s16,
+                children: [
+                  MonthGrid(store: store, month: _month),
+                  const _Legend(),
+                ],
+              ),
+              Column(
+                spacing: PresenceSpace.s20,
+                children: [
+                  Row(
+                    spacing: PresenceSpace.s24,
+                    children: [
+                      Expanded(
+                        child: Figure(
+                          label: 'Visits',
+                          value: '${summary.visits}',
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      child: Figure(
-                        label: 'Attendance',
-                        value: '${summary.pct}%',
+                      Expanded(
+                        child: Figure(
+                          label: 'Attendance',
+                          value: '${summary.pct}%',
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-                Row(
-                  spacing: PresenceSpace.s24,
-                  children: [
-                    Expanded(
-                      child: Figure(
-                        label: 'Current streak',
-                        value: '${store.currentStreak}',
-                        highlight: true,
+                    ],
+                  ),
+                  Row(
+                    spacing: PresenceSpace.s24,
+                    children: [
+                      Expanded(
+                        child: Figure(
+                          label: 'Current streak',
+                          value: '${store.currentStreak}',
+                          highlight: true,
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      child: Figure(
-                        label: 'Longest streak',
-                        value: '${store.longestStreak}',
+                      Expanded(
+                        child: Figure(
+                          label: 'Longest streak',
+                          value: '${store.longestStreak}',
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            Text(
-              'Attendance is visits divided by the ${summary.openDays} days '
-              'your gym has been open ${isCurrent ? 'so far this month' : 'that month'}. '
-              'Closed days do not count.',
-              style: PresenceType.caption,
-            ),
+                    ],
+                  ),
+                ],
+              ),
+              Text(
+                'Attendance is visits divided by the ${summary.openDays} days '
+                'your gym has been open ${isCurrent ? 'so far this month' : 'that month'}. '
+                'Closed days do not count.',
+                style: PresenceType.caption,
+              ),
+            ],
           ],
         );
       },
+    );
+  }
+}
+
+/// Shown until the month arrives from the server.
+class _MonthStatus extends StatelessWidget {
+  const _MonthStatus({required this.failed, required this.onRetry});
+
+  final bool failed;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!failed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: PresenceSpace.s40),
+        child: Text(
+          'Loading this month…',
+          textAlign: TextAlign.center,
+          style: PresenceType.bodyMuted,
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: PresenceSpace.s12,
+      children: [
+        const FieldError('Could not load this month. Check your connection.'),
+        PresenceButton(
+          label: 'Try again',
+          variant: ButtonVariant.secondary,
+          onPressed: onRetry,
+        ),
+      ],
     );
   }
 }

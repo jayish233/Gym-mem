@@ -9,8 +9,8 @@ import '../features/legal/legal_screen.dart';
 import '../features/plan/plan_screen.dart';
 import '../features/profile/profile_screen.dart';
 import '../features/scan/scan_screen.dart';
-import '../features/signin/code_screen.dart';
 import '../features/signin/signin_screen.dart';
+import '../features/signin/terms_screen.dart';
 import '../widgets/member_scaffold.dart';
 
 GoRouter buildRouter(SessionController session, MemberStore store) {
@@ -27,9 +27,7 @@ GoRouter buildRouter(SessionController session, MemberStore store) {
       final onSignin = path.startsWith('/signin');
       final isLegal = path == '/privacy' || path == '/terms';
       if (!session.isSignedIn) {
-        if (path == '/signin/code' && session.pendingEmail == null) {
-          return '/signin';
-        }
+        if (path == '/signin/terms' && !session.needsTerms) return '/signin';
         return onSignin || isLegal ? null : '/signin';
       }
       return onSignin ? '/home' : null;
@@ -40,8 +38,8 @@ GoRouter buildRouter(SessionController session, MemberStore store) {
         builder: (context, state) => SigninScreen(session: session),
         routes: [
           GoRoute(
-            path: 'code',
-            builder: (context, state) => CodeScreen(session: session),
+            path: 'terms',
+            builder: (context, state) => TermsScreen(session: session),
           ),
         ],
       ),
