@@ -1,0 +1,27 @@
+{
+  "name": "presence-server",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.ts",
+    "migrate": "node --env-file-if-exists=.env src/db/migrate.ts",
+    "seed": "node --env-file-if-exists=.env seed.ts",
+    "code": "node --env-file-if-exists=.env issue-code.ts",
+    "typecheck": "tsc",
+    "test": "node --env-file-if-exists=.env --test test/*.test.ts"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "express": "^5.3.0",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
+}
