@@ -9,6 +9,7 @@ app.disable('x-powered-by');
 // Set TRUST_PROXY (e.g. "1") behind a load balancer so login rate limits see the client IP.
 if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
 app.use(express.json());
+app.get('/health', (_req, res) => void res.json({ ok: true })); // host liveness check, no DB
 app.use(auth, attendance, workouts);
 
 app.use((_req, res) => fail(res, 404, 'not_found', 'No such route.'));

@@ -1,0 +1,21 @@
+# Render Blueprint for the Presence API (server/). Dashboard: New → Blueprint.
+services:
+  - type: web
+    name: presence-api
+    runtime: node
+    region: singapore
+    # Free sleeps after 15 min idle (first request then takes ~1 min).
+    # Switch to starter before real members rely on it.
+    plan: free
+    rootDir: server
+    buildCommand: npm ci
+    # Migrations are idempotent; the seed is never run here (it resets data).
+    startCommand: npm run migrate && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        sync: false # entered in the dashboard, never committed

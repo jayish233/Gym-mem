@@ -55,6 +55,7 @@ attendance.get('/attendance/summary', async (_req, res) => {
   });
   const [y, mo] = today.split('-').map(Number);
   res.json({
+    today, // gym-local date, so the app never guesses the gym's timezone
     currentStreak: currentStreak(attended, today, gym, m),
     longestStreak: longestStreak(attended, today, gym, m),
     checkedInToday: attended.has(today),

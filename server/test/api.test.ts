@@ -80,6 +80,7 @@ test('check-in, streaks, workouts, profile', { skip }, async () => {
   const today = localDate('Asia/Kolkata');
 
   const summary = (await call('GET', '/attendance/summary', token)).body;
+  assert.equal(summary.today, today);
   assert.equal(summary.currentStreak, 12);
   assert.equal(summary.longestStreak, 21);
   assert.equal(summary.checkedInToday, false);
