@@ -1,50 +1,49 @@
-# CLAUDE.md — Presence Member App (Flutter, mock data, no backend)
+# CLAUDE.md — Presence Member App
 
-This file is the single source of instructions for building this project. It is
-self-contained: you do not need to read `PRD.md` or the `Presence — Gym Retention
-Platform.html` prototype to do the work. Both exist in the repo for reference only.
-If this file and the PRD disagree, this file wins.
+This file is the build guide for the member app and its backend. Screen layout
+and visual rules are in sections 4 and 5. The backend is in section 8 and
+matches `PRD.md`. If this file and `PRD.md` disagree on the API, data model, or
+auth, `PRD.md` wins. The HTML prototype is reference only.
+
+The Flutter screens already run on an in-memory store. Do not rebuild them.
+The next build is the Node.js API. Do not wire `lib/` to the network until a
+later task says so.
 
 ---
 
 ## 1. What we are building
 
-A **member-only** Flutter app for "Presence", a gym attendance and retention
-product. A gym member signs in, checks in by scanning a QR code at the gym, and
-reviews their attendance calendar, streaks, weekly workout plan and profile.
+A **member-only** product. The Flutter app is the client. The server is a
+Node.js and TypeScript API with PostgreSQL. A member signs in with email and
+password, accepts the Terms and Privacy Policy, checks in by scanning a gym
+code, and reviews attendance, streaks, a weekly workout plan, and profile.
 
-This build is a **front-end-only vertical slice**:
+There is no OTP, no emailed code, and no `/signin/code` step in the target
+flow. The code screen still in the Flutter tree is the old mock and must not
+be copied into the server.
 
-- Every screen is fully designed and interactive.
-- All data is **hardcoded mock data held in memory**. There is no database, no
-  HTTP, no local persistence. Restarting the app returns to Sign in with fresh
-  seed data.
-- Sign in uses a **fake OTP**: any email that passes basic validation gets to the
-  code step, any 6 digits verify.
+### In scope
 
-### In scope (build all of these)
+| # | Surface | What |
+|---|---------|------|
+| 1 | `POST /auth/login`, logout, accept-terms | Email + password session. Terms acceptance once. |
+| 2 | `/home` | Greeting, streak panel, this week, scan CTA, today's workout, month summary |
+| 3 | `/history` | Month calendar, legend, visits / % / streak figures |
+| 4 | `/scan` + `POST /attendance/check-in` | Camera scan; success, expired, duplicate, invalid |
+| 5 | `/plan` | 7 day chips, editable day, exercises, mark completed |
+| 6 | `/profile` + `GET/PATCH /me` | Membership figures, name and phone, legal links, sign out |
+| 7 | `/privacy`, `/terms` | Legal pages in the app. The server stores acceptance timestamps only |
+| 8 | `server/` | Schema, migrations, seed script, and the routes in section 8 |
 
-| # | Route | Screen |
-|---|-------|--------|
-| 1 | `/signin`, `/signin/code` | Sign in (email) and Enter your code (6-digit OTP) |
-| 2 | `/home` | Home: greeting, streak panel, this week, scan CTA, today's workout, month summary |
-| 3 | `/history` | Attendance: month calendar, legend, visits / % / streak figures |
-| 4 | `/scan` | Scan attendance: camera permission, viewfinder, success, expired, already checked in |
-| 5 | `/plan` | Workout planner: 7 day chips, editable day, exercises, mark completed |
-| 6 | `/profile` | Profile: membership figures, editable name/phone, legal links, sign out |
-| 7 | `/privacy`, `/terms` | Static legal pages with placeholder copy |
+### Out of scope
 
-### Out of scope (do not build, do not scaffold, do not leave TODOs for)
-
-- Gym owner panel, staff accounts, registration / "Create your gym" flow, the
-  owner/member segmented toggle on Sign in.
-- Any backend: Cloudflare Workers, D1, Resend, cron jobs, real OTP, real QR token
-  validation, API clients, repositories with remote implementations.
-- Local persistence (`shared_preferences`, `hive`, `sqflite`, `isar`, files).
-- Payments, memberships management, inactivity alerts, analytics, notifications.
-- PWA "Add to home screen" banner from the web prototype (not applicable).
-- Platform targets other than Android and iOS. Leave the existing `linux/`
-  folder alone but do not add code for it.
+- Gym owner panel, staff, registration UI, "Create your gym", invitations.
+- OTP, Resend, email delivery, Cloudflare Workers, D1, cron, inactivity alerts.
+- Payments, analytics, notifications, QR display for the gym.
+- PWA "Add to home screen" banner.
+- Flutter persistence (`shared_preferences`, `hive`, `sqflite`, `isar`, files).
+- Platform targets other than Android and iOS. Leave `linux/` alone.
+- Connecting the Flutter client to this API until that task is asked for.
 
 ---
 
@@ -52,10 +51,12 @@ This build is a **front-end-only vertical slice**:
 
 These are non-negotiable. Check them before every commit.
 
-1. **No data layer beyond memory.** No package that persists or fetches data.
-   `pubspec.yaml` must not contain `http`, `dio`, `shared_preferences`, `hive`,
-   `sqflite`, `isar`, `drift`, `firebase_*`, `supabase_*`, or similar.
-2. **No owner code paths.** No `role` enum, no `isOwner`, no owner routes.
+1. **The database lives in `server/`, not in Flutter.** Do not add
+   `shared_preferences`, `hive`, `sqflite`, `isar`, `drift`, `firebase_*`, or
+   `supabase_*` to `pubspec.yaml`. Do not add `http` until the client-connection
+   task. Postgres access stays in the Node server.
+2. **No owner code paths.** No `role` enum, no `isOwner`, no owner routes, no
+   registration endpoint.
 3. **Design system only.** Use only the colours, type sizes, spacing, radii and
    component patterns in section 4. If something is missing, add it to section 4
    first, then use it.
@@ -65,10 +66,10 @@ These are non-negotiable. Check them before every commit.
    space. At most one dark "panel" per screen.
 6. **Every tappable control is at least 44 px tall** (member primary actions 56).
 7. **Figures are computed, never typed.** Streaks, visits, attendance % and
-   "today" come from the mock attendance set and a single clock. No literal
-   `'12'` streak strings in widgets.
-8. **Member sees only their own data.** There is exactly one member in the mock
-   store. Do not model other members.
+   "today" come from attendance rows and the gym timezone. No literal `'12'`
+   streak strings in widgets or API responses.
+8. **A member sees only their own rows.** The API takes the user id from the
+   session, never from the request body or query.
 9. **Workout completion never creates attendance.** Separate state, separate
    copy that says so.
 10. Keep copy short. One line beats a paragraph. Unknown facts are written as
@@ -103,8 +104,10 @@ Remove `cupertino_icons` only if it ends up unused.
   `ListenableBuilder` / `AnimatedBuilder` or passed down the tree. No `provider`,
   `riverpod`, `bloc`, code generation or `build_runner`.
 - **Three notifiers, created once in `main()` and passed into the router:**
-  - `SessionController` — `isSignedIn`, `pendingEmail`, `sendCode(email)`,
-    `verify(code)`, `signOut()`.
+  - `SessionController` — today this is the in-memory stand-in. The target
+    methods are `login(email, password)`, `acceptTerms()`, and `signOut()`
+    with a bearer token. Do not keep `sendCode` / `verify` once the client
+    calls the API. Do not add those OTP methods to the server.
   - `MemberStore` — the member, gym, membership, attendance set, workout plan,
     profile edits, `checkIn(DateTime at)`, streak and summary getters.
   - `MockClock` — `DateTime get now`; defaults to `DateTime.now()` but is
@@ -369,32 +372,28 @@ form centred, `max-width 380`.
 - Headline: "See who is drifting before they leave." 40 / 1.1 / 500, tracking
   −0.025em, max width 420 (28 px on phones).
 
-**Form (email step)**
+**Form (email and password)**
+
+The shipped app still shows "Send code" and `/signin/code`. That is the old
+mock. The target screen, used when the client calls the API, is:
 
 - Title "Sign in" (32 / 600 on wide, Page title 24 on phones).
 - Sub "Check in and keep your streak." Body 15 muted.
-- Field label "Email", `type email`, `autocomplete email`, placeholder
+- Field "Email", `type email`, `autocomplete email`, placeholder
   `you@example.com`.
-- Primary button 52 "Send code".
-- Validation: trim; require `@` and a `.` after it. Error state per 4.6 with copy
-  "Enter the email your gym has on file."
-- On submit: `session.sendCode(email)` then `context.go('/signin/code')`.
+- Field "Password", `type password`, `autocomplete current-password`.
+- Primary button 52 "Sign in".
+- Validation: trim email; require `@` and a `.` after it. Password at least 8
+  characters. Error state per 4.6. Wrong credentials use the server message
+  "Email or password is incorrect." Do not say which field failed.
+- On submit: `POST /auth/login`. If `termsAccepted` is false, show the Terms
+  and Privacy Policy and require acceptance (`POST /auth/accept-terms`) before
+  Home. If true, go to `/home`.
 - Footer caption centred: "By continuing you agree to the Terms and Privacy
   Policy." with "Terms" → `/terms` and "Privacy Policy" → `/privacy` as
   underlined ink links.
-
-**Code step — `/signin/code`**
-
-- Same chrome. Title "Enter your code". Sub "We emailed you a 6-digit code. It
-  expires in 10 minutes."
-- Six code boxes (4.6). Any six digits are accepted.
-- Key action button 52 "Verify and continue" — the only teal button on the
-  screen. Disabled until six digits are present. On tap: `session.verify(code)`
-  → `/home`.
-- Text link below, muted: "Use a different email" → back to `/signin`, clearing
-  the boxes.
-- If fewer than six digits and the user submits via keyboard, show the error
-  "Enter all 6 digits." under the boxes (2 px ink border on empty boxes).
+- Do not build a 6-digit code step. Remove `/signin/code` when the client is
+  connected. No email is sent.
 
 ### 5.2 Home — `/home`
 
@@ -558,8 +557,9 @@ Tab bar: Profile active.
    Rows min 56, hairline top (and bottom on the last), 15 text, chevron-right
    icon 20 muted at the right.
 5. **Sign out**: Secondary 52, 1 px ink outline, "Sign out" →
-   `session.signOut()` then `/signin`. Signing out also resets `MemberStore` to
-   seed data (fresh demo each time).
+   `POST /auth/logout`, drop the bearer token, then `/signin`. Logout does not
+   delete attendance or the workout plan. The in-memory `MemberStore.reset()`
+   on sign out applies only while the app is still on mock data.
 
 ### 5.7 Legal — `/privacy`, `/terms`
 
@@ -628,18 +628,16 @@ check in" and a successful scan visibly increments the streak to 13.
 today; compute it at seed time rather than copying the column above literally.
 Use the multiplication sign `×` (U+00D7) in sets strings.
 
-### Fake session
-
-`SessionController.sendCode` stores the email and returns `Future<void>` after a
-400 ms delay (show the button's loading state). `verify` accepts any 6-digit
-string after the same delay. Nothing is validated against a server.
+The same records are inserted by `server/seed.ts` (section 8.4). Today is not
+checked in, so a successful scan increments the streak from 12 to 13.
 
 ---
 
-## 7. Business rules that still apply without a backend
+## 7. Business rules
 
-Carried from the PRD. Implement them in `attendance_math.dart` as pure functions
-with unit tests.
+The Flutter helpers in `lib/data/attendance_math.dart` are the reference. The
+API must compute the same results. Gym-local "today" uses the gym timezone
+(`Asia/Kolkata` for the seed gym).
 
 1. **Open day:** a date is open if its weekday is not in `gym.closedWeekdays`
    and it is on/after `membership.start` and on/before `membership.end`.
@@ -663,12 +661,138 @@ with unit tests.
    copy says so.
 9. **Only the signed-in member's data exists.** No lists of members, no gym-wide
    figures.
-10. **A failed or cancelled scan never shows success.** Only a decoded payload
-    that passes mock validation reaches the Success state.
+10. **A failed or cancelled scan never shows success.** The Success screen
+    appears only after `POST /attendance/check-in` returns `checked_in`. A
+    payload that contains `expired` (any case), a past `expires_at`, an unknown
+    code, or a second check-in today does not insert a row.
 
 ---
 
-## 8. Agent workflow
+## 8. Backend
+
+Build this under `server/`. Do not put it in `lib/`. Stack: Node.js,
+TypeScript, Express, PostgreSQL via `pg`, SQL migrations, bcrypt or argon2.
+Config is `DATABASE_URL`, `PORT`, and `SEED_PASSWORD`.
+
+```text
+server/
+├── src/
+│   ├── index.ts
+│   ├── auth/
+│   ├── attendance/
+│   ├── workouts/
+│   └── db/
+├── migrations/
+├── seed.ts
+└── package.json
+```
+
+JSON errors: `{ "error": "machine_code", "message": "One sentence." }`.
+Protected routes read `Authorization: Bearer <token>`. The user id comes from
+the session only.
+
+### 8.1 Auth
+
+- Password minimum 8 characters. Store a hash only. Never log the password,
+  the session token, or a check-in code.
+- `POST /auth/login` with `{ "email", "password" }`. Trim and lower-case the
+  email. Unknown email and wrong password both return `401` and
+  `Email or password is incorrect.` Rate-limit per IP and per email.
+- Success `200`: `{ "token", "expiresAt", "termsAccepted" }`. The token is at
+  least 32 random bytes. Store only its hash. Lifetime is 30 days.
+- `POST /auth/accept-terms` sets `terms_accepted_at` and `privacy_accepted_at`
+  once. Requires a session. Returns `204`. The legal copy stays in the Flutter
+  pages; the server does not serve it.
+- Until both timestamps are set, only login, logout, accept-terms, and
+  `GET /me` succeed. Other member routes return `403` `terms_required`.
+- `POST /auth/logout` revokes the presented session and returns `204`,
+  including when the token is already revoked. Expired or revoked tokens get
+  `401` on protected routes.
+- No OTP route, no email send, no register route.
+
+### 8.2 Tables
+
+Timestamps are `timestamptz` (UTC). Calendar values are `date`. Weekdays are
+`1` Monday through `7` Sunday.
+
+- `gyms` — name, IANA `timezone`, `closed_weekdays smallint[]`.
+- `users` — `gym_id`, name, lower-case unique email, phone, `password_hash`,
+  `terms_accepted_at`, `privacy_accepted_at`.
+- `memberships` — `user_id` unique, `gym_id`, `start_date`, `end_date`. Status
+  is derived: Active when gym-local today is inside the range, else Expired.
+  No suspension column.
+- `sessions` — `user_id`, unique `token_hash`, `expires_at`, `revoked_at`.
+- `attendance` — `user_id`, `gym_id`, `attendance_date`, `checked_in_at`.
+  Unique on `(user_id, gym_id, attendance_date)`.
+- `check_in_codes` — `gym_id`, `code_hash`, `expires_at`. Plaintext is shown
+  once by the script that inserts the row.
+- `workout_days` — `user_id`, `weekday`, `name`, `completed`. Unique on
+  `(user_id, weekday)`.
+- `workout_exercises` — `workout_day_id`, `position`, `name`, `sets`.
+
+### 8.3 Routes
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/auth/login` | Email and password |
+| POST | `/auth/accept-terms` | Record terms and privacy acceptance |
+| POST | `/auth/logout` | Revoke this session |
+| GET | `/me` | Profile, gym, membership, `termsAccepted`, initials |
+| PATCH | `/me` | `name` and `phone`. Blank name is `400`. Email is ignored |
+| GET | `/attendance/summary` | Streaks, `checkedInToday`, Monday-first `week`, current `month` |
+| GET | `/attendance/calendar?year&month` | Day states plus month figures. Streaks are overall |
+| POST | `/attendance/check-in` | Body `{ "code" }` |
+| GET | `/workouts` | Seven days with exercises |
+| PUT | `/workouts/:weekday` | Replace one day, `weekday` `1`–`7` |
+
+`GET /me` returns `id`, `name`, `email`, `phone`, `initials`, `gym`,
+`membership` (`startDate`, `endDate`, `status`), `termsAccepted`.
+
+Summary includes `currentStreak`, `longestStreak`, `checkedInToday`, `week`
+(each day: `date`, `state`, `weekdayLetter`), and `month` (`name`, `visits`,
+`openDays`, `pct`).
+
+Calendar days use `present`, `today`, `upcoming`, `closed`, `missed`,
+`not_joined`, plus a label such as `October 14, attended`. `404` when the
+month is before the membership start month or after the current month.
+
+Check-in `200` body: `{ "result", "attendanceDate", "checkedInAt", "currentStreak" }`.
+`result` is `checked_in`, `expired`, `duplicate`, or `invalid`. Only
+`checked_in` inserts a row, and only after the insert commits. A code whose
+plaintext contains `expired`, or whose `expires_at` has passed, is `expired`.
+A code that is not this gym's current code is `invalid`.
+
+`PUT /workouts/:weekday` body: `{ "name", "completed", "exercises": [{ "name", "sets" }] }`.
+Drop blank exercise names. Blank `sets` becomes `3 × 10`. The list replaces
+that day's exercises. This route must not write `attendance`.
+
+### 8.4 Seed
+
+`npm run seed` is idempotent on the development database.
+
+- Gym Iron Works Fitness, `Asia/Kolkata`, closed Sunday (`7`).
+- User Priya Sharma, `priya.sharma@example.com`, `+91 98101 20034`. Password
+  from `SEED_PASSWORD` (at least 8 characters). Print the email. Do not print
+  the password.
+- Membership `2026-01-12` through `2027-03-14`.
+- Attendance pattern in section 6, through yesterday in the gym timezone.
+  Today has no row.
+- Workout plan in section 6. `completed` is true only for weekdays earlier
+  than today.
+- One development check-in code, valid for 24 hours, plaintext printed once.
+  Say in the output that it is a development code. A real gym code lifetime
+  is 60 seconds.
+- Leave both acceptance timestamps null.
+
+### 8.5 Security
+
+Generic login errors, hashed passwords, hashed session tokens, hashed
+check-in codes, login rate limit, parameterised SQL, every member query
+filtered by the session user, HTTPS when deployed, no OTP secrets in logs.
+
+---
+
+## 9. Agent workflow
 
 ### Commands
 
@@ -676,8 +800,8 @@ with unit tests.
 flutter pub get
 flutter analyze          # must be clean
 dart format .            # run before finishing
-flutter test             # unit + widget tests must pass
-flutter run              # Android emulator or iOS simulator; use a real device for the camera
+flutter test             # existing widget and math tests must keep passing
+cd server && npm test    # API tests for the backend
 ```
 
 Platform setup the camera needs (do this when adding `mobile_scanner`):
@@ -689,36 +813,37 @@ Platform setup the camera needs (do this when adding `mobile_scanner`):
 
 ### Build order
 
-Work in this order and keep the app runnable after each step.
+The Flutter app through the legal pages is already built. Do not redo it.
+Build the server in this order:
 
-1. Replace the counter demo: `main.dart`, `app/`, `theme/tokens.dart`,
-   `theme/presence_theme.dart`, shared `widgets/` (buttons, text field, figure,
-   hairline, tab bar, member scaffold).
-2. `data/`: models, `MockClock`, `seed.dart`, `attendance_math.dart` with
-   tests, `MemberStore`, `SessionController`.
-3. Router with redirect; placeholder screens for every route so navigation is
-   testable end to end.
-4. Sign in and Code screens.
-5. Home.
-6. Attendance (History).
-7. Scan (permission → camera → results), including the debug preview links.
-8. Workout planner.
-9. Profile and sign-out reset.
-10. Legal pages.
-11. Polish pass: semantics, reduced motion, disabled states, 44 px audit,
-    `flutter analyze`, `dart format`, tests.
+1. `server/` project, migrations for the tables in section 8.2.
+2. Password hashing, sessions, login, logout, accept-terms, and the terms gate.
+3. `GET /me` and `PATCH /me`.
+4. Attendance summary, calendar, and check-in, using section 7.
+5. Workout read and replace. Completion must not write attendance.
+6. `npm run seed` from section 8.4.
+7. API tests listed below.
+
+Leave `lib/` on the in-memory store until a later task connects it.
 
 ### Tests to write (minimum)
 
-- `attendance_math_test.dart`: open-day detection with Sundays closed; current
-  and longest streak around closed days and the membership start; monthly
-  summary for a past month and the current month; future days never missed.
-- `member_store_test.dart`: `checkIn` is idempotent per day; completion toggle
-  does not touch attendance; sign-out reset restores seed.
-- `signin_flow_test.dart` (widget): invalid email shows the error; valid email
-  → code screen; six digits enable Verify → lands on Home.
-- `tab_bar_test.dart` (widget): tapping each tab navigates and marks it active;
-  Scan item stays ink.
+Backend:
+
+- Login rejects a wrong password and an unknown email with the same `401`.
+- No route accepts a 6-digit code.
+- Attendance and workout routes return `403` `terms_required` before
+  accept-terms, then succeed.
+- Logout revokes the token; the next call with it returns `401`.
+- A valid seed code inserts one row for today and moves the current streak
+  from 12 to 13. A second check-in returns `duplicate`.
+- A code containing `expired`, and a code past `expires_at`, insert nothing.
+- Marking a workout day completed does not change attendance.
+- `PATCH /me` cannot change email. A member cannot read another member's rows.
+
+Existing Flutter tests stay: `attendance_math_test.dart`,
+`member_store_test.dart`, `signin_flow_test.dart`, `tab_bar_test.dart`.
+Update `signin_flow_test.dart` only when the client drops the OTP screen.
 
 ### When to stop and ask
 
@@ -728,37 +853,33 @@ Stop and ask the user instead of guessing when:
   alternative changes the UI noticeably.
 - Camera scanning cannot be exercised in the available environment (say so; do
   not fake a success path outside the debug preview links).
-- Anything would require adding persistence, networking or an owner concept.
+- The task would add an owner, staff, registration, or OTP flow.
+- The task would point Flutter at the API. That connection is a separate ask.
 
 Everything else (exact pixel tweaks, icon choice within Lucide, copy
 punctuation) is your call; follow section 4.
 
 ---
 
-## 9. Definition of done
+## 10. Definition of done
+
+Flutter (already in the tree; do not regress it):
 
 - [ ] `flutter analyze` and `flutter test` pass; `dart format .` makes no
       changes.
-- [ ] `pubspec.yaml` contains only the packages listed in section 3 (plus
-      Flutter SDK deps).
-- [ ] Cold start lands on `/signin`; any valid email + any 6 digits reach
-      `/home`; Sign out returns to `/signin` with seed data restored.
-- [ ] All seven routes render on a 390 × 844 viewport without horizontal
-      scrolling or overflow warnings; Sign in renders as two panes at ≥ 720.
-- [ ] Home greeting, week row, "Today · {workout}", and month summary are all
-      derived from `MockClock` and `MemberStore`, not literals.
-- [ ] History: prev/next limits respected; legend present; the explanation
-      sentence uses the computed open-day count.
-- [ ] Scan: permission, scanning, expired, duplicate and success states all
-      reachable; a successful scan adds today to attendance exactly once and the
-      streak on Home increments.
-- [ ] Plan: add, remove, rename and mark completed work per day; completion
-      never changes attendance.
-- [ ] Profile: save toggles to "Saved"; email is read-only with helper text;
-      membership status derived from dates.
-- [ ] Every icon-only control has a tooltip/semantics label; all controls are
-      ≥ 44 px; no red/green, no shadows, no cards; only one teal button per
-      screen.
-- [ ] Reduced-motion disables the scan sweep.
-- [ ] No owner, staff, registration, persistence or network code anywhere in
-      `lib/`.
+- [ ] Screens follow sections 4 and 5. No red/green, no shadows, no cards,
+      controls at least 44 px, one teal button per screen.
+- [ ] `lib/` has no owner, staff, registration, or persistence code.
+
+Backend:
+
+- [ ] `server/` implements section 8 against PostgreSQL. No Cloudflare, D1,
+      Resend, or OTP.
+- [ ] Seeded member logs in with email and password. Wrong password fails
+      with the generic message.
+- [ ] Terms acceptance is required before attendance and workout routes.
+- [ ] Logout revokes the session.
+- [ ] Check-in, calendar, streaks, profile save, and the workout plan match
+      section 7 and section 12 of `PRD.md`.
+- [ ] Sign out does not delete attendance. Workout completion does not create
+      it.
